@@ -1,0 +1,773 @@
+{
+  "name": "Standalone Teacher Contract Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-teacher-contracts",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "wh-01",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ],
+      "webhookId": "generate-teacher-contracts"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/16t8R4NxPqECmpawN0AogN719FPMiXGLWS9qH-so34gA",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 288302101,
+          "mode": "list",
+          "cachedResultName": "Form Responses 1"
+        },
+        "options": {}
+      },
+      "id": "read-crm-01",
+      "name": "Read CRM",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        460,
+        400
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "iqB69W5BJDamQkKG",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "4vsQNiZCwFdDM1KB",
+          "mode": "list",
+          "cachedResultName": "Pending OT Queue"
+        },
+        "returnAll": true
+      },
+      "id": "read-ot-01",
+      "name": "Read Oral Test Queue",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        680,
+        400
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Read student email from webhook body\nconst body = $('Webhook').first().json.body || $('Webhook').first().json;\nconst studentEmail = (body.studentEmail || '').trim().toLowerCase();\n\nif (!studentEmail) {\n  throw new Error('studentEmail required in POST body');\n}\n\n// Find the CRM row matching the email (most recent row wins for duplicates)\nconst allRows = $('Read CRM').all();\nconst matches = allRows.filter(r => {\n  const email = (r.json['Email Address'] || '').toLowerCase().trim();\n  return email === studentEmail;\n});\n\nif (matches.length === 0) {\n  throw new Error(`No CRM row found for ${studentEmail}`);\n}\n// Use last match (most recent submission)\nconst match = matches[matches.length - 1];\n\nconst row = match.json;\nconst fullName = (row['Prénom et Nom'] || '').trim();\nconst language = (row['Langue souhaitée'] || 'Anglais').trim();\nconst totalHoursRaw = row[\"Durée de la formation/nombre d'heures souhaitées\"];\nconst totalHours = Number(totalHoursRaw) || 0;\nconst rawTeacherData = row['Le professeurs concernés'] || '';\n\n// Tarif has weird column name with newline — check all variants\nconst tarifHoraire = Number(row['Tarif horaire \\n'] || row['Tarif horaire'] || row['Tarif horaire\\n'] || 35);\nconst volumeHoraire = Number(row['Volume horaire du contrat'] || totalHours);\nconst pourcentage = Number(row['Pourcentage prévisionnel'] || 100);\nconst certifieOuNon = row['<<CERTIFIE_OU_NON_CERTIFIE>> '] || '';\n\n// Start/end dates — format to DD/MM/YYYY\nfunction formatDate(dateStr) {\n  if (!dateStr) return '';\n  if (typeof dateStr === 'number') {\n    const ms = Math.round((dateStr - 25569) * 86400 * 1000);\n    const d = new Date(ms);\n    if (isNaN(d.getTime())) return '';\n    return String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + d.getFullYear();\n  }\n  const s = String(dateStr).trim();\n  const m = s.match(/^(\\d{1,2})[\\/\\-](\\d{1,2})[\\/\\-](\\d{4})$/);\n  if (m) return m[1].padStart(2,'0') + '/' + m[2].padStart(2,'0') + '/' + m[3];\n  const d = new Date(s);\n  if (isNaN(d.getTime())) return '';\n  return String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + d.getFullYear();\n}\n\nconst startDateRaw = formatDate(row['Date de début de la formation']);\nconst endDateRaw = formatDate(row['Date de fin de formation']);\n\n// Teacher mapping (from existing onboarding workflow, trimmed for safety)\nconst teacherMap = [\n  { key: \"Megan Tierney\", dbName: \"Megan Tierney\" },\n  { key: \"Jennifer Harbin\", dbName: \"Jennifer Harbin\" },\n  { key: \"Jessica ParisMix\", dbName: \"Jessica Morris Macor\" },\n  { key: \"Rachel Hasson\", dbName: \"Rachel Hasson\" },\n  { key: \"LLE Lara langues\", dbName: \"Lara Garcia Novella\" },\n  { key: \"GEORGINA COUCHOT\", dbName: \"Georgina Couchot\" },\n  { key: \"NISHIKAWA ISABELLE\", dbName: \"Isabelle Nishikawa\" },\n  { key: \"Pascale Albouy\", dbName: \"Pascale Albouy\" },\n  { key: \"Mme Alexandra Gabrielle Billet\", dbName: \"Alexandra Gabrielle Billet\" },\n  { key: \"Caroline Aoustin\", dbName: \"Caroline Aoustin\" },\n  { key: \"M Z MATIN\", dbName: \"Zafar Matin\" },\n  { key: \"PRICE REBECCA\", dbName: \"PRICE REBECCA\" },\n  { key: \"LAMARQUE, Hannah\", dbName: \"Hannah Lamarque\" }\n];\n\nconst results = [];\nteacherMap.forEach(teacher => {\n  if (rawTeacherData.includes(teacher.key)) {\n    results.push({\n      json: {\n        studentEmail,\n        studentName: fullName,\n        language,\n        totalHours,\n        tarifHoraire,\n        volumeHoraire,\n        pourcentage,\n        certifieOuNon,\n        startDateRaw,\n        endDateRaw,\n        rawTeacherData,\n        cleanedTeacherName: teacher.dbName.trim()\n      }\n    });\n  }\n});\n\nif (results.length === 0) {\n  throw new Error(`No matching teachers found in \"${rawTeacherData}\" for ${studentEmail}`);\n}\n\nreturn results;\n"
+      },
+      "id": "split-01",
+      "name": "Split Teachers For Loop",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-01",
+      "name": "Loop Over Teachers",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1120,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "FcvkzNqw3ghOOF99",
+          "mode": "list",
+          "cachedResultName": "Teachers Data"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "Name",
+              "keyValue": "={{ $json.cleanedTeacherName }}"
+            }
+          ]
+        }
+      },
+      "id": "lookup-01",
+      "name": "Lookup Teacher",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Inside loop — one teacher item at a time\nconst item = $input.first().json;  // from Lookup Teacher\nconst studentItem = $('Split Teachers For Loop').first().json;\n\n// The Lookup Teacher output contains the teacher's DT row\n// (first row of the DT filter result)\nconst teacher = item;\n\n// Today DD/MM/YYYY\nconst now = new Date();\nconst today = String(now.getDate()).padStart(2, '0') + '/' +\n              String(now.getMonth() + 1).padStart(2, '0') + '/' +\n              now.getFullYear();\n\n// Oral test data (may or may not exist)\nlet startDateFormatted = studentItem.startDateRaw || '';\nlet endDateFormatted = studentItem.endDateRaw || '';\ntry {\n  const otItems = $('Read Oral Test Queue').all();\n  const otMatch = otItems.find(o => (o.json.studentEmail || '').toLowerCase() === studentItem.studentEmail.toLowerCase());\n  if (otMatch) {\n    startDateFormatted = otMatch.json.trainingStartDate || startDateFormatted;\n    endDateFormatted = otMatch.json.trainingEndDate || endDateFormatted;\n  }\n} catch (e) {\n  // OT lookup optional — keep CRM values\n}\n\n// Helpers\nconst safe = (s) => (s || '').replace(/[^a-zA-Z\\u00C0-\\u017F0-9]/g, '_');\n\n// Dynamic Montant\nconst tarifHoraire = Number(studentItem.tarifHoraire) || 35;\nconst volumeHoraire = Number(studentItem.volumeHoraire) || Number(studentItem.totalHours) || 0;\nconst pourcentage = Number(studentItem.pourcentage) || 100;\nconst payment = (tarifHoraire * volumeHoraire).toFixed(2);\n\n// First email only\nconst teacherEmail = ((teacher.Email || '').split(';')[0] || '').trim();\n\n// Full address\nconst teacherAddress = [teacher.Address, teacher.City_and_Postal_Code, teacher.Country]\n  .filter(Boolean).join(', ');\n\nconst teacherName = (teacher.Name || studentItem.cleanedTeacherName || '').trim();\n\nconst contractFileName = `Contrat_Enseignant_${safe(teacherName)}_${safe(studentItem.studentName)}_${today.replace(/\\//g, '-')}`;\n\nreturn [{\n  json: {\n    teacherName,\n    teacherEmail,\n    teacherAddress,\n    teacherNDA: teacher.NDA || 'N/A',\n    teacherSIRET: teacher.SIRET_SIREN_Notes || '',\n    teacherCertified: teacher.CERTIFIE_OU_NON_CERTIFIE || studentItem.certifieOuNon || '',\n    studentName: studentItem.studentName,\n    studentEmail: studentItem.studentEmail,\n    language: studentItem.language,\n    totalHours: Number(studentItem.totalHours) || 0,\n    tarifHoraire,\n    volumeHoraire,\n    pourcentage,\n    payment,\n    todayDate: today,\n    contractFileName,\n    startDateFormatted,\n    endDateFormatted\n  }\n}];\n"
+      },
+      "id": "prep-01",
+      "name": "Prepare Contract Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "copy",
+        "fileId": {
+          "__rl": true,
+          "value": "1Bm2KxOoiY1cY1m0Rktr3ovqVWy7JIEzXx0KXuGYZ2TI",
+          "mode": "id"
+        },
+        "name": "={{ $json.contractFileName }}",
+        "sameFolder": false,
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "1KqdTi7p__WCDdTV5oJfU7L5itjZ9ksC0",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "copy-01",
+      "name": "Copy Template",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1780,
+        300
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "ddziMFrcb3ADiTuG",
+          "name": "Google Drive"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $('Copy Template').first().json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "replaceAll",
+              "text": "<<Nom du sous-traitant>>",
+              "replaceText": "={{ $('Prepare Contract Data').first().json.teacherName }}"
+            },
+            {
+              "action": "replaceAll",
+              "text": "<<adresse>>",
+              "replaceText": "={{ $('Prepare Contract Data').first().json.teacherAddress }}"
+            },
+            {
+              "action": "replaceAll",
+              "text": "<<langue>>",
+              "replaceText": "={{ $('Prepare Contract Data').first().json.language }}"
+            },
+            {
+              "action": "replaceAll",
+              "text": "<<nom de stagiaire>>",
+              "replaceText": "={{ $('Prepare Contract Data').first().json.studentName }}"
+            },
+            {
+              "action": "replaceAll",
+              "text": "<<MONTANT>>",
+              "replaceText": "={{ String($('Prepare Contract Data').first().json.payment) }}"
+            },
+            {
+              "action": "replaceAll",
+              "text": "<<date>>",
+              "replaceText": "={{ $('Prepare Contract Data').first().json.todayDate }}"
+            },
+            {
+              "action": "replaceAll",
+              "text": "<<Nom de formateur>>",
+              "replaceText": "={{ $('Prepare Contract Data').first().json.teacherName }}"
+            },
+            {
+              "action": "replaceAll",
+              "text": "<<NUMERO_NDA>>",
+              "replaceText": "={{ String($('Prepare Contract Data').first().json.teacherNDA) }}"
+            },
+            {
+              "action": "replaceAll",
+              "text": "<<SIRET_FORMATEUR>>",
+              "replaceText": "={{ $('Prepare Contract Data').first().json.teacherSIRET }}"
+            },
+            {
+              "action": "replaceAll",
+              "text": "<<CERTIFIE_OU_NON_CERTIFIE>>",
+              "replaceText": "={{ $('Prepare Contract Data').first().json.teacherCertified }}"
+            },
+            {
+              "action": "replaceAll",
+              "text": "<<heures>>",
+              "replaceText": "={{ String($('Prepare Contract Data').first().json.volumeHoraire) }}"
+            },
+            {
+              "action": "replaceAll",
+              "text": "<<lieu>>",
+              "replaceText": "={{ $('Prepare Contract Data').first().json.teacherAddress }}"
+            },
+            {
+              "action": "replaceAll",
+              "text": "<<date_debut>>",
+              "replaceText": "={{ $('Prepare Contract Data').first().json.startDateFormatted }}"
+            },
+            {
+              "action": "replaceAll",
+              "text": "<<date_fin>>",
+              "replaceText": "={{ $('Prepare Contract Data').first().json.endDateFormatted }}"
+            },
+            {
+              "action": "replaceAll",
+              "text": "<<Durée>>",
+              "replaceText": "={{ String($('Prepare Contract Data').first().json.totalHours) }}"
+            },
+            {
+              "action": "replaceAll",
+              "text": "<<PERCENTAGE>>",
+              "replaceText": "={{ String($('Prepare Contract Data').first().json.pourcentage) }}"
+            }
+          ]
+        }
+      },
+      "id": "fill-01",
+      "name": "Fill Placeholders",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        300
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "2hdoXcE8Mfr07xZt",
+          "name": "Google Docs"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst teacherData = $('Prepare Contract Data').first().json;\nconst contractDocId = $('Copy Template').first().json.id;\nconst contractDocUrl = 'https://docs.google.com/document/d/' + contractDocId + '/edit';\n\n// Student folder ID not looked up in this workflow; existing student row in Pending Contracts DT may already have it\nconst folderId = '';\n\nconst emailData = JSON.stringify({\n  teacherName: teacherData.teacherName,\n  studentName: teacherData.studentName,\n  language: teacherData.language,\n  totalHours: teacherData.totalHours,\n  payment: teacherData.payment\n});\n\nreturn [{\n  json: {\n    studentName: teacherData.studentName,\n    studentEmail: teacherData.studentEmail || '',\n    teacherName: teacherData.teacherName,\n    teacherEmail: teacherData.teacherEmail,\n    contractType: 'teacher',\n    contractDocId: contractDocId,\n    contractDocUrl: contractDocUrl,\n    conventionDocId: '',\n    conventionDocUrl: '',\n    convocationDocId: '',\n    convocationDocUrl: '',\n    programmeDocId: '',\n    programmeDocUrl: '',\n    examGuideDocId: '',\n    studentFolderId: folderId,\n    status: 'Draft',\n    generatedAt: new Date().toISOString(),\n    language: teacherData.language || '',\n    totalHours: Number(teacherData.totalHours) || 0,\n    paymentAmount: Number(teacherData.payment) || 0,\n    oralTestLink: '',\n    languageTestLink: '',\n    emailData: emailData\n  }\n}];\n"
+      },
+      "id": "prep-pend-01",
+      "name": "Prepare Pending Contract",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "ab7d375L1CabAJYs",
+          "mode": "list",
+          "cachedResultName": "Pending Contracts"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "studentEmail",
+              "keyValue": "={{ $json.studentEmail }}"
+            },
+            {
+              "keyName": "teacherEmail",
+              "keyValue": "={{ $json.teacherEmail }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "studentName": "={{ $json.studentName }}",
+            "studentEmail": "={{ $json.studentEmail }}",
+            "teacherName": "={{ $json.teacherName }}",
+            "teacherEmail": "={{ $json.teacherEmail }}",
+            "contractType": "={{ $json.contractType }}",
+            "contractDocId": "={{ $json.contractDocId }}",
+            "contractDocUrl": "={{ $json.contractDocUrl }}",
+            "conventionDocId": "={{ $json.conventionDocId }}",
+            "conventionDocUrl": "={{ $json.conventionDocUrl }}",
+            "convocationDocId": "={{ $json.convocationDocId }}",
+            "convocationDocUrl": "={{ $json.convocationDocUrl }}",
+            "programmeDocId": "={{ $json.programmeDocId }}",
+            "programmeDocUrl": "={{ $json.programmeDocUrl }}",
+            "examGuideDocId": "={{ $json.examGuideDocId }}",
+            "studentFolderId": "={{ $json.studentFolderId }}",
+            "status": "={{ $json.status }}",
+            "generatedAt": "={{ $json.generatedAt }}",
+            "language": "={{ $json.language }}",
+            "totalHours": "={{ $json.totalHours }}",
+            "paymentAmount": "={{ $json.paymentAmount }}",
+            "oralTestLink": "={{ $json.oralTestLink }}",
+            "languageTestLink": "={{ $json.languageTestLink }}",
+            "emailData": "={{ $json.emailData }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "studentName",
+              "displayName": "studentName",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "studentEmail",
+              "displayName": "studentEmail",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "teacherName",
+              "displayName": "teacherName",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "teacherEmail",
+              "displayName": "teacherEmail",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "contractType",
+              "displayName": "contractType",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "contractDocId",
+              "displayName": "contractDocId",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "contractDocUrl",
+              "displayName": "contractDocUrl",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "conventionDocId",
+              "displayName": "conventionDocId",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "conventionDocUrl",
+              "displayName": "conventionDocUrl",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "convocationDocId",
+              "displayName": "convocationDocId",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "convocationDocUrl",
+              "displayName": "convocationDocUrl",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "programmeDocId",
+              "displayName": "programmeDocId",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "programmeDocUrl",
+              "displayName": "programmeDocUrl",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "examGuideDocId",
+              "displayName": "examGuideDocId",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "studentFolderId",
+              "displayName": "studentFolderId",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "generatedAt",
+              "displayName": "generatedAt",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "language",
+              "displayName": "language",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "totalHours",
+              "displayName": "totalHours",
+              "type": "number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "paymentAmount",
+              "displayName": "paymentAmount",
+              "type": "number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "oralTestLink",
+              "displayName": "oralTestLink",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "languageTestLink",
+              "displayName": "languageTestLink",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "emailData",
+              "displayName": "emailData",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "upsert-01",
+      "name": "Upsert Pending Contract",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        2440,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst items = $('Upsert Pending Contract').all();\nconst contracts = items.map(i => ({\n  teacher: i.json.teacherName || '',\n  docUrl: i.json.contractDocUrl || ''\n}));\nreturn [{\n  json: {\n    success: true,\n    count: contracts.length,\n    contracts\n  }\n}];\n"
+      },
+      "id": "summary-01",
+      "name": "Build Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "respond-01",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1560,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Read CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read CRM": {
+      "main": [
+        [
+          {
+            "node": "Read Oral Test Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Oral Test Queue": {
+      "main": [
+        [
+          {
+            "node": "Split Teachers For Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Teachers For Loop": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Teachers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Teachers": {
+      "main": [
+        [
+          {
+            "node": "Build Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Lookup Teacher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Teacher": {
+      "main": [
+        [
+          {
+            "node": "Prepare Contract Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Contract Data": {
+      "main": [
+        [
+          {
+            "node": "Copy Template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Copy Template": {
+      "main": [
+        [
+          {
+            "node": "Fill Placeholders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fill Placeholders": {
+      "main": [
+        [
+          {
+            "node": "Prepare Pending Contract",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Pending Contract": {
+      "main": [
+        [
+          {
+            "node": "Upsert Pending Contract",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Pending Contract": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Teachers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Summary": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "timezone": "Europe/Paris"
+  }
+}

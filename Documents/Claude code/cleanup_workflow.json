@@ -1,0 +1,172 @@
+{
+  "name": "Cleanup Teacher Contracts (one-shot)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cleanup-teacher-contracts",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "wh-01",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ],
+      "webhookId": "cleanup-teacher-contracts"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "ab7d375L1CabAJYs",
+          "mode": "list",
+          "cachedResultName": "Pending Contracts"
+        },
+        "returnAll": true
+      },
+      "id": "read-01",
+      "name": "Read All Contracts",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        460,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst studentEmail = ($('Webhook').first().json.body.studentEmail || '').trim().toLowerCase();\nconst teacherFilter = ($('Webhook').first().json.body.teacherName || '').trim().toLowerCase();\nif (!studentEmail) throw new Error('studentEmail required');\n\nconst allContracts = $input.all();\nconst toDelete = allContracts.filter(it => {\n  const c = it.json;\n  const matchesStudent = (c.studentEmail || '').toLowerCase().trim() === studentEmail;\n  const isTeacher = (c.contractType || '').toLowerCase() === 'teacher';\n  const isDraftOrEmpty = !['sent','signed','awaiting signature'].includes((c.status || '').toLowerCase());\n  let matchesTeacher = true;\n  if (teacherFilter) {\n    matchesTeacher = (c.teacherName || '').toLowerCase().includes(teacherFilter);\n  }\n  return matchesStudent && isTeacher && isDraftOrEmpty && matchesTeacher;\n});\n\nreturn toDelete.map(it => ({ json: { rowId: it.json.id || it.json.rowId || it.json.row_number, ...it.json } }));\n"
+      },
+      "id": "filter-01",
+      "name": "Filter Rows to Delete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "dataTableId": {
+          "__rl": true,
+          "value": "ab7d375L1CabAJYs",
+          "mode": "list",
+          "cachedResultName": "Pending Contracts"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        }
+      },
+      "id": "delete-01",
+      "name": "Delete Row",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        900,
+        400
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst deleted = $input.all();\nreturn [{\n  json: {\n    success: true,\n    deletedCount: deleted.length,\n    deletedRows: deleted.map(d => ({\n      id: d.json.id,\n      teacher: d.json.teacherName,\n      status: d.json.status\n    }))\n  }\n}];\n"
+      },
+      "id": "summary-01",
+      "name": "Build Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "respond-01",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1340,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Read All Contracts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read All Contracts": {
+      "main": [
+        [
+          {
+            "node": "Filter Rows to Delete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Rows to Delete": {
+      "main": [
+        [
+          {
+            "node": "Delete Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Row": {
+      "main": [
+        [
+          {
+            "node": "Build Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Summary": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
