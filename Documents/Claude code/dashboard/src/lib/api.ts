@@ -19,12 +19,6 @@ const API_BASE =
   process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL ||
   "https://learninggoalsformations.app.n8n.cloud/webhook";
 
-// N8N_BASE is ONLY for endpoints Phase 4 does NOT own (contract-approve-send — Phase 6
-// owns that migration). Remove this when Phase 6 ships.
-const N8N_BASE =
-  process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL ||
-  "https://learninggoalsformations.app.n8n.cloud/webhook";
-
 async function fetchEndpoint<T>(path: string): Promise<T[]> {
   const url = `${API_BASE}/${path}`;
   const res = await fetch(url, { cache: "no-store" });
@@ -100,12 +94,8 @@ export async function getPendingContracts(): Promise<PendingContract[]> {
 
 export async function approveAndSendContract(id: string): Promise<{ success: boolean; message: string }> {
   if (DEMO_MODE) return { success: true, message: "Contract sent (demo mode)" };
-  const url = `${N8N_BASE}/contract-approve-send`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id }),
-  });
+  const url = `${API_BASE}/api/contracts/${id}/approve`;
+  const res = await fetch(url, { method: "POST" });
   if (!res.ok) {
     throw new Error(`Failed to approve contract: ${res.status}`);
   }
