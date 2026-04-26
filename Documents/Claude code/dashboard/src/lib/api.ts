@@ -12,12 +12,23 @@ import {
   getDemoTeacherView,
 } from "./demo-data";
 
-// Phase 4: API_BASE points at Railway when NEXT_PUBLIC_API_BASE_URL is set (preview/prod
-// cutover); falls through to n8n while migration is in progress.
+// Phase 9 D-06: hardcoded n8n fallback removed. Post-cutover, missing
+// NEXT_PUBLIC_API_BASE_URL must fail loudly in dev. Phase 4's 3-tier
+// permissive fallback served the migration-in-progress window; that window
+// closed at cutover.
+//
+// NEXT_PUBLIC_N8N_WEBHOOK_URL stays as a fallback for one route only:
+// /api/contracts/generate-teacher (teacher-contract still on n8n;
+// Phase 5 deferred). See dashboard/src/app/api/contracts/generate-teacher/route.ts.
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
-  process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL ||
-  "https://learninggoalsformations.app.n8n.cloud/webhook";
+  process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL;
+if (!API_BASE) {
+  throw new Error(
+    "NEXT_PUBLIC_API_BASE_URL not set — dashboard cannot reach the Railway API. " +
+      "Set the env var on Vercel (production) or .env.local (development).",
+  );
+}
 
 async function fetchEndpoint<T>(path: string): Promise<T[]> {
   const url = `${API_BASE}/${path}`;
@@ -337,4 +348,38 @@ export async function getContracts(): Promise<Contract[]> {
       date: parsed.date,
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9 — cutover-status feed for /admin/health page (D-04a)
+// ---------------------------------------------------------------------------
+
+export interface CronStatus {
+  /** Raw RunSummary blobs from logs (cron-specific shape). */
+  lastTicks: unknown[];
+  /** ISO timestamp of most-recent tick. null when no ticks. */
+  lastTickAt: string | null;
+  /** ticks.length for convenience. */
+  lastN: number;
+}
+
+export interface CutoverStatusResponse {
+  onboarding: CronStatus;
+  ficheMonitor: CronStatus;
+  signnowChecker: CronStatus;
+  contractApprove: CronStatus;
+  /** ISO — query window start (24h ago at request time). */
+  since: string;
+  source: "logs" | "postgres";
+  /** Populated when Railway log query fails OR RAILWAY_API_TOKEN is unset. */
+  warning?: string;
+}
+
+export async function getCutoverStatus(): Promise<CutoverStatusResponse> {
+  const url = `${API_BASE}/api/cutover-status`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch cutover-status: ${res.status}`);
+  }
+  return res.json();
 }
