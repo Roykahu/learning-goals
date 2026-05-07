@@ -75,27 +75,27 @@ function CronCard({ title, cadence, status }: CronCardProps) {
   const emailsTotal = sumEmailsSent(status.lastTicks);
   const errorTone = errorsTotal === 0 ? "text-emerald-400" : "text-rose-400";
   return (
-    <div className="rounded-lg border border-[#1e293b] bg-[#0f1629] p-4">
+    <div className="rounded-lg border border-border bg-card p-4">
       <div className="mb-3">
-        <div className="text-sm font-semibold text-white">{title}</div>
-        <div className="text-xs text-[#64748b]">{cadence}</div>
+        <div className="text-sm font-semibold text-foreground">{title}</div>
+        <div className="text-xs text-muted-foreground">{cadence}</div>
       </div>
       <dl className="space-y-1 text-sm">
         <div className="flex justify-between">
-          <dt className="text-[#64748b]">Ticks (24h)</dt>
-          <dd className="text-white tabular-nums">{status.lastN}</dd>
+          <dt className="text-muted-foreground">Ticks (24h)</dt>
+          <dd className="text-foreground tabular-nums">{status.lastN}</dd>
         </div>
         <div className="flex justify-between">
-          <dt className="text-[#64748b]">Errors</dt>
+          <dt className="text-muted-foreground">Errors</dt>
           <dd className={`tabular-nums ${errorTone}`}>{errorsTotal}</dd>
         </div>
         <div className="flex justify-between">
-          <dt className="text-[#64748b]">Emails sent</dt>
-          <dd className="text-white tabular-nums">{emailsTotal}</dd>
+          <dt className="text-muted-foreground">Emails sent</dt>
+          <dd className="text-foreground tabular-nums">{emailsTotal}</dd>
         </div>
         <div className="flex justify-between">
-          <dt className="text-[#64748b]">Last tick</dt>
-          <dd className="text-white">{relativeTime(status.lastTickAt)}</dd>
+          <dt className="text-muted-foreground">Last tick</dt>
+          <dd className="text-foreground">{relativeTime(status.lastTickAt)}</dd>
         </div>
       </dl>
     </div>
@@ -139,11 +139,11 @@ export default function AdminHealthPage() {
       {/* Header */}
       <div className="mb-6 flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-white">Cutover Health</h1>
-          <p className="text-sm text-[#64748b] mt-1">
+          <h1 className="text-2xl font-semibold text-foreground">Cutover Health</h1>
+          <p className="text-sm text-muted-foreground mt-1">
             48-hour watch surface for the n8n→Railway cutover.
           </p>
-          <p className="text-xs text-[#64748b] mt-1">
+          <p className="text-xs text-muted-foreground mt-1">
             Last refreshed:{" "}
             {refreshedAt ? refreshedAt.toLocaleTimeString() : "—"}
           </p>
@@ -151,7 +151,7 @@ export default function AdminHealthPage() {
         <button
           onClick={() => void refresh()}
           disabled={loading}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50 transition-colors"
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-foreground hover:bg-primary/80 disabled:opacity-50 transition-colors"
         >
           {loading ? "Refreshing…" : "Refresh"}
         </button>
@@ -218,16 +218,16 @@ export default function AdminHealthPage() {
           {[1, 2, 3, 4].map((i) => (
             <div
               key={i}
-              className="h-36 rounded-lg border border-[#1e293b] bg-[#0f1629] p-4 animate-pulse"
+              className="h-36 rounded-lg border border-border bg-card p-4 animate-pulse"
             />
           ))}
         </div>
       )}
 
       {/* D-01c footnote — n8n: teacher-contract workflow still active */}
-      <div className="mt-8 border-t border-[#1e293b] pt-4 text-xs text-[#64748b]">
+      <div className="mt-8 border-t border-border pt-4 text-xs text-muted-foreground">
         <p>
-          <strong className="text-[#94a3b8]">Note:</strong> 4 ported crons are
+          <strong className="text-muted-foreground">Note:</strong> 4 ported crons are
           shown above. The n8n <code>teacher-contract</code> workflow
           (<code>DkUrvmqy6NhLy6UG</code>) is still active — Phase 5 deferred to
           post-cutover. Missing teacher-contract metrics here are NOT a
