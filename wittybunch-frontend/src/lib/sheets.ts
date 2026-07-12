@@ -5,7 +5,19 @@ import type { DashboardData, ParsedSubmission, SheetRow, SignupRow } from "./typ
 
 const SIGNUPS_TAB = "_signups";
 const MESSAGES_TAB = "_messages";
+const OVERRIDES_TAB = "_dashboard_overrides";
 const DEPOSIT_TOTAL = 85;
+
+type EnrolmentOverrideAction = "exclude" | "update" | "restore";
+
+type EnrolmentOverride = {
+  source_row_key: string;
+  kid_index: string;
+  action: EnrolmentOverrideAction;
+  sessions_per_week: string;
+  reason: string;
+  created_at: string;
+};
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -48,6 +60,76 @@ async function readValues(spreadsheetId: string, range: string): Promise<string[
     valueRenderOption: "FORMATTED_VALUE"
   });
   return (response.data.values || []) as string[][];
+}
+
+async function readOptionalValues(spreadsheetId: string, range: string): Promise<string[][]> {
+  try {
+    return await readValues(spreadsheetId, range);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("Unable to parse range") || message.includes("Requested entity was not found")) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+function overrideKey(sourceRowKey: string, kidIndex: string): string {
+  return `${sourceRowKey}::${kidIndex}`;
+}
+
+function latestOverrides(values: string[][]): Map<string, EnrolmentOverride> {
+  const overrides = new Map<string, EnrolmentOverride>();
+  for (const row of rowObjects(values)) {
+    const action = clean(row.action) as EnrolmentOverrideAction;
+    const sourceRowKey = clean(row.source_row_key);
+    const kidIndex = clean(row.kid_index);
+    if (!sourceRowKey || !kidIndex) continue;
+    const key = overrideKey(sourceRowKey, kidIndex);
+    if (action === "restore") {
+      overrides.delete(key);
+      continue;
+    }
+    if (action === "exclude" || action === "update") {
+      overrides.set(key, {
+        source_row_key: sourceRowKey,
+        kid_index: kidIndex,
+        action,
+        sessions_per_week: clean(row.sessions_per_week),
+        reason: clean(row.reason),
+        created_at: clean(row.created_at)
+      });
+    }
+  }
+  return overrides;
+}
+
+async function ensureOverridesSheet(spreadsheetId: string) {
+  const sheets = sheetsClient();
+  const metadata = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: "sheets.properties.title"
+  });
+  const exists = (metadata.data.sheets || []).some((sheet) => sheet.properties?.title === OVERRIDES_TAB);
+  if (!exists) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [{ addSheet: { properties: { title: OVERRIDES_TAB } } }]
+      }
+    });
+  }
+  const values = await readOptionalValues(spreadsheetId, `${OVERRIDES_TAB}!A1:F1`);
+  if (values.length === 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${OVERRIDES_TAB}!A1:F1`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [["source_row_key", "kid_index", "action", "sessions_per_week", "reason", "created_at"]]
+      }
+    });
+  }
 }
 
 function first(row: SheetRow, names: string[]): string {
@@ -183,9 +265,10 @@ export async function getDashboardData(): Promise<DashboardData> {
   const formSheetId = requireEnv("WITTYBUNCH_FORM_RESPONSES_SHEET_ID");
   const trackingSheetId = requireEnv("WITTYBUNCH_TRACKING_SHEET_ID");
 
-  const [formValues, signupValues] = await Promise.all([
+  const [formValues, signupValues, overrideValues] = await Promise.all([
     readValues(formSheetId, "Form responses 1!A:BP"),
-    readValues(trackingSheetId, `${SIGNUPS_TAB}!A:Q`)
+    readValues(trackingSheetId, `${SIGNUPS_TAB}!A:Q`),
+    readOptionalValues(trackingSheetId, `${OVERRIDES_TAB}!A:F`)
   ]);
 
   const headers = formValues[0] || [];
@@ -196,15 +279,28 @@ export async function getDashboardData(): Promise<DashboardData> {
 
   const signups = rowObjects(signupValues).map(normalizeSignup);
   const processed = new Set(signups.map((row) => `${row.source_row_key}::${row.kid_index}`));
+  const overrides = latestOverrides(overrideValues);
 
   const submissionsWithPending = submissions.map((submission) => {
-    const pendingChildren = submission.valid_children.filter(
+    const adjustedChildren = submission.valid_children.flatMap((child) => {
+      const override = overrides.get(overrideKey(submission.source_row_key, child.kid_index));
+      if (override?.action === "exclude") return [];
+      if (override?.action === "update" && override.sessions_per_week) {
+        return [{
+          ...child,
+          sessions_per_week: override.sessions_per_week,
+          evidence: [...child.evidence, `Dashboard override ${override.created_at || "recorded"}`]
+        }];
+      }
+      return [child];
+    });
+    const pendingChildren = adjustedChildren.filter(
       (child) => !processed.has(`${submission.source_row_key}::${child.kid_index}`)
     );
     return {
       ...submission,
-      already_invoiced: submission.valid_children.length - pendingChildren.length,
       valid_children: pendingChildren,
+      already_invoiced: adjustedChildren.length - pendingChildren.length,
       total_amount: pendingChildren.length * DEPOSIT_TOTAL
     };
   });
@@ -224,6 +320,36 @@ export async function getDashboardData(): Promise<DashboardData> {
       paidInvoices
     }
   };
+}
+
+export async function upsertEnrolmentOverride(input: {
+  source_row_key: string;
+  kid_index: string;
+  action: EnrolmentOverrideAction;
+  sessions_per_week?: string;
+  reason?: string;
+}) {
+  const trackingSheetId = requireEnv("WITTYBUNCH_TRACKING_SHEET_ID");
+  const sourceRowKey = clean(input.source_row_key);
+  const kidIndex = clean(input.kid_index);
+  const action = input.action;
+  const sessions = clean(input.sessions_per_week);
+  const reason = clean(input.reason);
+
+  if (!sourceRowKey || !kidIndex) throw new Error("Missing enrolment row identity.");
+  if (!["exclude", "update", "restore"].includes(action)) throw new Error("Invalid enrolment override action.");
+  if (action === "update" && !sessions) throw new Error("Enter the updated sessions value before saving.");
+
+  await ensureOverridesSheet(trackingSheetId);
+  const sheets = sheetsClient();
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: trackingSheetId,
+    range: `${OVERRIDES_TAB}!A:F`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: [[sourceRowKey, kidIndex, action, sessions, reason, new Date().toISOString()]]
+    }
+  });
 }
 
 export async function appendMessageLog(input: {
