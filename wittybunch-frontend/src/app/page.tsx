@@ -1,6 +1,6 @@
 import { isAuthenticated } from "@/lib/auth";
 import { getDashboardData } from "@/lib/sheets";
-import type { ParsedSubmission, SignupRow } from "@/lib/types";
+import type { ParsedSubmission, PaymentCycleSummary, SignupRow } from "@/lib/types";
 import {
   archiveAction,
   createInvoiceAction,
@@ -8,6 +8,7 @@ import {
   logoutAction,
   messageAction,
   removeEnrolmentAction,
+  updatePaymentAdjustmentAction,
   updateEnrolmentAction
 } from "./actions";
 import { BatchEmailPanel, LoginForm } from "./components";
@@ -114,6 +115,33 @@ function MissingSetupPage({ error }: { error: string }) {
   );
 }
 
+function PaymentCyclePanel({ summaries }: { summaries: PaymentCycleSummary[] }) {
+  return (
+    <section className="panel">
+      <div className="section-heading">
+        <h2>Payment cycles</h2>
+        <span>Paid totals include Pennylane reconciled rows and justified dashboard adjustments.</span>
+      </div>
+      <div className="cycle-grid">
+        {summaries.map((summary) => (
+          <article className="cycle-card" key={summary.cycle}>
+            <div>
+              <h3>{summary.label}</h3>
+              <span>{summary.paidRows} paid · {summary.partialRows} partial · {summary.pendingRows} pending</span>
+            </div>
+            <dl>
+              <div><dt>Expected</dt><dd>{money(summary.expectedTotal)}</dd></div>
+              <div><dt>Paid</dt><dd>{money(summary.paidTotal)}</dd></div>
+              <div><dt>Outstanding</dt><dd>{money(summary.outstandingTotal)}</dd></div>
+            </dl>
+            {summary.adjustedRows > 0 ? <p>{summary.adjustedRows} justified adjustment{summary.adjustedRows > 1 ? "s" : ""}</p> : null}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ReadyItem({ submission }: { submission: ParsedSubmission }) {
   const payload = JSON.stringify(invoicePayload(submission));
   return (
@@ -179,6 +207,7 @@ function SignupTable({ signups }: { signups: SignupRow[] }) {
             <th>Parent</th>
             <th>Child</th>
             <th>Invoice</th>
+            <th>Cycle</th>
             <th>Status</th>
             <th>Actions</th>
           </tr>
@@ -196,9 +225,15 @@ function SignupTable({ signups }: { signups: SignupRow[] }) {
               </td>
               <td>
                 {row.pennylane_invoice_id || "No invoice id"}
-                <span>{row.invoice_amount ? money(row.invoice_amount) : "No amount"}</span>
+                <span>Invoice: {row.invoice_amount ? money(row.invoice_amount) : "No amount"}</span>
+                <span>Expected: {money(row.payment_expected_amount)} · Paid: {money(row.payment_paid_amount)}</span>
               </td>
-              <td><span className={`pill ${row.paid_at ? "success" : "neutral"}`}>{row.paid_at ? "Paid" : row.invoice_status || "Pending"}</span></td>
+              <td>
+                {row.payment_cycle_label}
+                {row.payment_adjustment_reason ? <span>{row.payment_adjustment_reason}</span> : null}
+                {row.payment_adjustment_notes ? <span>{row.payment_adjustment_notes}</span> : null}
+              </td>
+              <td><span className={`pill ${row.payment_status === "paid" || row.payment_status === "overpaid" || row.payment_status === "waived" ? "success" : row.payment_status === "partial" ? "warning" : "neutral"}`}>{row.payment_status}</span></td>
               <td>
                 <div className="kid-actions">
                   <form action={messageAction} className="inline-form">
@@ -227,6 +262,55 @@ function SignupTable({ signups }: { signups: SignupRow[] }) {
                     <button className="ghost-button danger-ghost" type="submit">Archive</button>
                   </form>
                 </div>
+                <form action={updatePaymentAdjustmentAction} className="payment-adjust-form">
+                  <input type="hidden" name="source_row_key" value={row.source_row_key} />
+                  <input type="hidden" name="kid_index" value={row.kid_index} />
+                  <input type="hidden" name="pennylane_invoice_id" value={row.pennylane_invoice_id} />
+                  <label>
+                    Cycle
+                    <select name="payment_cycle" defaultValue={row.payment_cycle}>
+                      <option value="reservation">Reservation</option>
+                      <option value="trimester_1">1st trimester</option>
+                      <option value="trimester_2">2nd trimester</option>
+                      <option value="trimester_3">3rd trimester</option>
+                    </select>
+                  </label>
+                  <label>
+                    Expected
+                    <input name="expected_amount" inputMode="decimal" defaultValue={String(row.payment_expected_amount || "")} />
+                  </label>
+                  <label>
+                    Paid
+                    <input name="paid_amount" inputMode="decimal" defaultValue={String(row.payment_paid_amount || "")} />
+                  </label>
+                  <label>
+                    Status
+                    <select name="payment_status" defaultValue={row.payment_status}>
+                      <option value="pending">Pending</option>
+                      <option value="partial">Partial</option>
+                      <option value="paid">Paid</option>
+                      <option value="overpaid">Overpaid</option>
+                      <option value="waived">Waived</option>
+                    </select>
+                  </label>
+                  <label>
+                    Reason
+                    <select name="justification_type" defaultValue={row.payment_adjustment_reason}>
+                      <option value="">Choose reason</option>
+                      <option value="pennylane_reconciliation">Pennylane reconciliation</option>
+                      <option value="recommendation_credit">Recommendation credit</option>
+                      <option value="book_credit">Books paid but not needed</option>
+                      <option value="multi_trimester_payment">Several trimesters paid at once</option>
+                      <option value="amount_correction">Amount correction</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </label>
+                  <label className="wide-field">
+                    Justification notes
+                    <input name="justification_notes" defaultValue={row.payment_adjustment_notes} placeholder="Required for accounting trace" />
+                  </label>
+                  <button className="ghost-button proof-ghost" type="submit">Save accounting</button>
+                </form>
               </td>
             </tr>
           ))}
@@ -273,6 +357,8 @@ export default async function Page() {
       </section>
 
       <BatchEmailPanel />
+
+      <PaymentCyclePanel summaries={data.paymentCycleSummaries} />
 
       <section className="panel">
         <div className="section-heading">
