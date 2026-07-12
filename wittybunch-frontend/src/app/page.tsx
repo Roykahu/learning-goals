@@ -40,6 +40,22 @@ function invoicePayload(submission: ParsedSubmission) {
   };
 }
 
+function paymentProofMessage(row: SignupRow) {
+  const childLine = row.kid_name ? ` concernant l'inscription de ${row.kid_name}` : "";
+  const invoiceLine = row.pennylane_invoice_id ? ` La facture ${row.pennylane_invoice_id} a donc été envoyée comme justificatif.` : " La facture a donc été envoyée comme justificatif.";
+  return [
+    "Bonjour,",
+    "",
+    `Nous vous confirmons que le montant a déjà été réglé${childLine}.`,
+    `${invoiceLine} Elle a été établie et envoyée conformément aux règles générales de facturation.`,
+    "",
+    "Aucune action supplémentaire n'est requise de votre part. Ce document sert principalement de preuve de paiement pour vos dossiers.",
+    "",
+    "Bien cordialement,",
+    "Witty Bunch"
+  ].join("\n");
+}
+
 function LoginPage() {
   return (
     <main className="login-shell">
@@ -191,6 +207,13 @@ function SignupTable({ signups }: { signups: SignupRow[] }) {
                     <input type="hidden" name="subject" value="Witty Bunch payment follow-up" />
                     <input type="hidden" name="message" value={`Bonjour, petit rappel concernant l'inscription de ${row.kid_name || "votre enfant"}.`} />
                     <button className="ghost-button" type="submit">Message</button>
+                  </form>
+                  <form action={messageAction} className="inline-form">
+                    <input type="hidden" name="parent_email" value={row.parent_email} />
+                    <input type="hidden" name="parent_name" value={row.parent_name} />
+                    <input type="hidden" name="subject" value="Witty Bunch invoice for payment proof" />
+                    <input type="hidden" name="message" value={paymentProofMessage(row)} />
+                    <button className="ghost-button proof-ghost" type="submit">Proof email</button>
                   </form>
                   <form action={exemptAction} className="inline-form">
                     <input type="hidden" name="parent_email" value={row.parent_email} />
