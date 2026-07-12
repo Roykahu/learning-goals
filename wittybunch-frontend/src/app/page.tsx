@@ -1,0 +1,245 @@
+import { isAuthenticated } from "@/lib/auth";
+import { getDashboardData } from "@/lib/sheets";
+import type { ParsedSubmission, SignupRow } from "@/lib/types";
+import { archiveAction, createInvoiceAction, exemptAction, logoutAction, messageAction } from "./actions";
+import { BatchEmailPanel, LoginForm } from "./components";
+
+export const dynamic = "force-dynamic";
+
+function money(amount: number | string) {
+  const value = typeof amount === "number" ? amount : Number(amount || 0);
+  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(value);
+}
+
+function invoicePayload(submission: ParsedSubmission) {
+  return {
+    parent: {
+      email: submission.parent_email,
+      name: submission.parent_name,
+      phone: submission.parent_phone,
+      address: submission.parent_address
+    },
+    kids: submission.valid_children.map((kid) => ({
+      ...kid,
+      source_row_key: submission.source_row_key,
+      source_form_key: submission.source_form_key,
+      submitted_at: submission.submitted_at,
+      parent_email: submission.parent_email,
+      parent_name: submission.parent_name,
+      parent_phone: submission.parent_phone,
+      parent_address: submission.parent_address
+    }))
+  };
+}
+
+function LoginPage() {
+  return (
+    <main className="login-shell">
+      <section className="login-panel">
+        <p className="eyebrow">Wittybunch</p>
+        <h1>Payment cockpit</h1>
+        <p className="muted">Private view for sign-ups, deposit invoices, and payment follow-up.</p>
+        <LoginForm />
+      </section>
+    </main>
+  );
+}
+
+function Metric({ label, value, alert = false }: { label: string; value: string | number; alert?: boolean }) {
+  return (
+    <article className={`metric-card ${alert ? "alert" : ""}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </article>
+  );
+}
+
+function MissingSetupPage({ error }: { error: string }) {
+  const requiredVariables = [
+    "GOOGLE_SERVICE_ACCOUNT_EMAIL",
+    "GOOGLE_PRIVATE_KEY",
+    "WITTYBUNCH_FORM_RESPONSES_SHEET_ID",
+    "WITTYBUNCH_TRACKING_SHEET_ID"
+  ];
+
+  return (
+    <main className="dashboard-shell">
+      <div className="topbar">
+        <div>
+          <p className="eyebrow">Wittybunch</p>
+          <h1>Local setup needed</h1>
+          <p className="muted">The password worked. The dashboard needs Google Sheets settings before it can load live data locally.</p>
+        </div>
+        <form action={logoutAction}><button className="secondary-button">Log out</button></form>
+      </div>
+
+      <section className="panel setup-panel">
+        <div className="section-heading">
+          <h2>Missing local data access</h2>
+          <span>No secrets are shown here.</span>
+        </div>
+        <div className="banner danger-banner">{error}</div>
+        <p className="muted">
+          Add these variable names to <strong>.env.local</strong>, then restart the local dashboard.
+        </p>
+        <ul className="setup-list">
+          {requiredVariables.map((name) => <li key={name}><code>{name}</code></li>)}
+        </ul>
+      </section>
+    </main>
+  );
+}
+
+function ReadyItem({ submission }: { submission: ParsedSubmission }) {
+  const payload = JSON.stringify(invoicePayload(submission));
+  return (
+    <article className="ready-item">
+      <div className="ready-main">
+        <div className="ready-who">
+          <strong>{submission.parent_name}</strong>
+          <span className="pill source-badge">{submission.valid_children.length} valid child{submission.valid_children.length > 1 ? "ren" : ""}</span>
+        </div>
+        <div className="ready-contact">{submission.parent_email} · {submission.parent_phone || "no phone"}</div>
+        <div className="ready-kids">
+          {submission.valid_children.map((kid) => `${kid.kid_name}${kid.sessions_per_week ? ` (${kid.sessions_per_week})` : ""}`).join(", ")}
+        </div>
+        {submission.ignored_children.length > 0 ? (
+          <div className="ignored-box">
+            <strong>Ignored extra child sections:</strong>
+            {submission.ignored_children.map((kid) => (
+              <span key={`${kid.kid_index}-${kid.raw_name}`}>
+                Child {kid.kid_index}: {kid.raw_name || "blank"} — {kid.reason}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <div className="ready-action">
+        <span className="ready-total">{money(submission.total_amount)}</span>
+        <form action={createInvoiceAction}>
+          <input type="hidden" name="payload" value={payload} />
+          <button className="invoice-cta-primary" type="submit">Create invoice</button>
+        </form>
+      </div>
+    </article>
+  );
+}
+
+function SignupTable({ signups }: { signups: SignupRow[] }) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Parent</th>
+            <th>Child</th>
+            <th>Invoice</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {signups.slice(0, 80).map((row, index) => (
+            <tr key={`${row.source_row_key}-${row.kid_index}-${index}`} className={!row.kid_name ? "attention-row" : ""}>
+              <td>
+                {row.parent_name || "Missing parent"}
+                <span>{row.parent_email}</span>
+              </td>
+              <td>
+                {row.kid_name || "Missing child name"}
+                <span>{row.sessions_per_week || "No session value"}</span>
+              </td>
+              <td>
+                {row.pennylane_invoice_id || "No invoice id"}
+                <span>{row.invoice_amount ? money(row.invoice_amount) : "No amount"}</span>
+              </td>
+              <td><span className={`pill ${row.paid_at ? "success" : "neutral"}`}>{row.paid_at ? "Paid" : row.invoice_status || "Pending"}</span></td>
+              <td>
+                <div className="kid-actions">
+                  <form action={messageAction} className="inline-form">
+                    <input type="hidden" name="parent_email" value={row.parent_email} />
+                    <input type="hidden" name="parent_name" value={row.parent_name} />
+                    <input type="hidden" name="subject" value="Witty Bunch payment follow-up" />
+                    <input type="hidden" name="message" value={`Bonjour, petit rappel concernant l'inscription de ${row.kid_name || "votre enfant"}.`} />
+                    <button className="ghost-button" type="submit">Message</button>
+                  </form>
+                  <form action={exemptAction} className="inline-form">
+                    <input type="hidden" name="parent_email" value={row.parent_email} />
+                    <input type="hidden" name="source_row_key" value={row.source_row_key} />
+                    <input type="hidden" name="kid_index" value={row.kid_index} />
+                    <button className="ghost-button" type="submit">Exempt</button>
+                  </form>
+                  <form action={archiveAction} className="inline-form">
+                    <input type="hidden" name="parent_email" value={row.parent_email} />
+                    <input type="hidden" name="source_row_key" value={row.source_row_key} />
+                    <button className="ghost-button danger-ghost" type="submit">Archive</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export default async function Page() {
+  if (!(await isAuthenticated())) return <LoginPage />;
+
+  let data;
+  try {
+    data = await getDashboardData();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "The dashboard could not load its Google Sheets data.";
+    return <MissingSetupPage error={message} />;
+  }
+
+  return (
+    <main className="dashboard-shell">
+      <div className="topbar">
+        <div>
+          <p className="eyebrow">Wittybunch</p>
+          <h1>Payment dashboard</h1>
+          <p className="muted">Totals below are calculated only from validated child registrations. Empty, negative, and partial extra-child sections are ignored.</p>
+        </div>
+        <form action={logoutAction}><button className="secondary-button">Log out</button></form>
+      </div>
+
+      {data.metrics.ignoredChildSections > 0 ? (
+        <div className="banner danger-banner">
+          {data.metrics.ignoredChildSections} extra-child section{data.metrics.ignoredChildSections > 1 ? "s were" : " was"} ignored because it did not contain enough real registration information.
+        </div>
+      ) : null}
+
+      <section className="metric-grid">
+        <Metric label="Families ready" value={data.metrics.readyFamilies} />
+        <Metric label="Valid children pending" value={data.metrics.validChildrenPending} />
+        <Metric label="Ignored child sections" value={data.metrics.ignoredChildSections} alert={data.metrics.ignoredChildSections > 0} />
+        <Metric label="Tracked invoices" value={data.metrics.trackedInvoices} />
+        <Metric label="Paid invoices" value={data.metrics.paidInvoices} />
+      </section>
+
+      <BatchEmailPanel />
+
+      <section className="panel">
+        <div className="section-heading">
+          <h2>Ready to invoice</h2>
+          <span>Invoice totals use validated children only: €85 per valid child.</span>
+        </div>
+        <div className="ready-list">
+          {data.readyToInvoice.length === 0 ? <p className="empty-state">No validated children waiting for invoice creation.</p> : null}
+          {data.readyToInvoice.map((submission) => <ReadyItem key={submission.id} submission={submission} />)}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <h2>Tracked signups and invoices</h2>
+          <span>Rows with missing child names are highlighted because they may come from historical bad data.</span>
+        </div>
+        <SignupTable signups={data.signups} />
+      </section>
+    </main>
+  );
+}
