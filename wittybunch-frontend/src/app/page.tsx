@@ -1,7 +1,15 @@
 import { isAuthenticated } from "@/lib/auth";
 import { getDashboardData } from "@/lib/sheets";
 import type { ParsedSubmission, SignupRow } from "@/lib/types";
-import { archiveAction, createInvoiceAction, exemptAction, logoutAction, messageAction } from "./actions";
+import {
+  archiveAction,
+  createInvoiceAction,
+  exemptAction,
+  logoutAction,
+  messageAction,
+  removeEnrolmentAction,
+  updateEnrolmentAction
+} from "./actions";
 import { BatchEmailPanel, LoginForm } from "./components";
 
 export const dynamic = "force-dynamic";
@@ -100,8 +108,29 @@ function ReadyItem({ submission }: { submission: ParsedSubmission }) {
           <span className="pill source-badge">{submission.valid_children.length} valid child{submission.valid_children.length > 1 ? "ren" : ""}</span>
         </div>
         <div className="ready-contact">{submission.parent_email} · {submission.parent_phone || "no phone"}</div>
-        <div className="ready-kids">
-          {submission.valid_children.map((kid) => `${kid.kid_name}${kid.sessions_per_week ? ` (${kid.sessions_per_week})` : ""}`).join(", ")}
+        <div className="enrolment-list">
+          {submission.valid_children.map((kid) => (
+            <div className="enrolment-row" key={`${submission.source_row_key}-${kid.kid_index}`}>
+              <div className="enrolment-child">
+                <strong>{kid.kid_name}</strong>
+                <span>{kid.sessions_per_week || "No session value"}</span>
+              </div>
+              <form action={updateEnrolmentAction} className="enrolment-edit">
+                <input type="hidden" name="source_row_key" value={submission.source_row_key} />
+                <input type="hidden" name="kid_index" value={kid.kid_index} />
+                <label>
+                  Sessions
+                  <input name="sessions_per_week" defaultValue={kid.sessions_per_week} aria-label={`Sessions for ${kid.kid_name}`} />
+                </label>
+                <button className="ghost-button" type="submit">Save</button>
+              </form>
+              <form action={removeEnrolmentAction} className="inline-form">
+                <input type="hidden" name="source_row_key" value={submission.source_row_key} />
+                <input type="hidden" name="kid_index" value={kid.kid_index} />
+                <button className="ghost-button danger-ghost" type="submit">Remove</button>
+              </form>
+            </div>
+          ))}
         </div>
         {submission.ignored_children.length > 0 ? (
           <div className="ignored-box">
