@@ -122,6 +122,56 @@ button:disabled { cursor: progress; opacity: .7; }
 .ready-main { display: grid; gap: 4px; min-width: 240px; }
 .ready-who { align-items: center; display: flex; gap: 8px; }
 .ready-contact, .ready-kids { color: var(--muted); font-size: 13px; }
+.enrolment-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+}
+.enrolment-row {
+  align-items: center;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(160px, 1fr) minmax(260px, 1.3fr) auto;
+  padding: 10px;
+}
+.enrolment-child {
+  display: grid;
+  gap: 3px;
+}
+.enrolment-child strong {
+  font-size: 14px;
+  line-height: 1.25;
+}
+.enrolment-child span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.enrolment-edit {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(140px, 1fr) auto;
+}
+.enrolment-edit label {
+  color: var(--muted);
+  display: grid;
+  font-size: 11px;
+  font-weight: 800;
+  gap: 4px;
+  text-transform: uppercase;
+}
+.enrolment-edit input {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  min-height: 34px;
+  padding: 6px 8px;
+  text-transform: none;
+}
 .ready-action { align-items: center; display: flex; gap: 12px; }
 .ready-total { font-size: 16px; font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; font-weight: 800; }
 .invoice-cta-primary { min-height: 38px; padding: 6px 18px; }
@@ -241,4 +291,5 @@ td span { color: var(--muted); display: block; font-size: 12px; margin-top: 4px;
   .dashboard-shell { padding: 20px 14px 36px; }
   .ready-item { align-items: stretch; flex-direction: column; }
   .ready-action { justify-content: space-between; }
+  .enrolment-row, .enrolment-edit { grid-template-columns: 1fr; }
 }
