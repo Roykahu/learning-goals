@@ -11,7 +11,7 @@ import {
   buildSafetyPreview,
   type PreparedEmail
 } from "@/lib/email-batch";
-import { appendMessageLog, getDashboardData } from "@/lib/sheets";
+import { appendMessageLog, getDashboardData, upsertEnrolmentOverride } from "@/lib/sheets";
 import type { ChildRecord } from "@/lib/types";
 
 type SendReport = {
@@ -153,6 +153,27 @@ export async function createInvoiceAction(formData: FormData) {
   }
 
   await postWebhook("N8N_WEBHOOK_INVOICE", { ...payload, kids: valid });
+  revalidatePath("/");
+}
+
+export async function updateEnrolmentAction(formData: FormData) {
+  await upsertEnrolmentOverride({
+    source_row_key: String(formData.get("source_row_key") || ""),
+    kid_index: String(formData.get("kid_index") || ""),
+    action: "update",
+    sessions_per_week: String(formData.get("sessions_per_week") || ""),
+    reason: "Parent changed the enrolment before invoice creation"
+  });
+  revalidatePath("/");
+}
+
+export async function removeEnrolmentAction(formData: FormData) {
+  await upsertEnrolmentOverride({
+    source_row_key: String(formData.get("source_row_key") || ""),
+    kid_index: String(formData.get("kid_index") || ""),
+    action: "exclude",
+    reason: "Parent cancelled this child before invoice creation"
+  });
   revalidatePath("/");
 }
 
