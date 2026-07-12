@@ -284,6 +284,7 @@ td span { color: var(--muted); display: block; font-size: 12px; margin-top: 4px;
   padding: 4px 12px;
 }
 .danger-ghost { border-color: var(--warn-border); color: var(--warn); }
+.proof-ghost { border-color: #a7c8bc; color: #105947; }
 
 @media (max-width: 900px) {
   .section-heading, .topbar { align-items: stretch; flex-direction: column; }
