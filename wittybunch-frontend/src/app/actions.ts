@@ -11,7 +11,7 @@ import {
   buildSafetyPreview,
   type PreparedEmail
 } from "@/lib/email-batch";
-import { appendMessageLog, getDashboardData, upsertEnrolmentOverride } from "@/lib/sheets";
+import { appendMessageLog, getDashboardData, upsertEnrolmentOverride, upsertPaymentAdjustment } from "@/lib/sheets";
 import type { ChildRecord } from "@/lib/types";
 
 type SendReport = {
@@ -173,6 +173,21 @@ export async function removeEnrolmentAction(formData: FormData) {
     kid_index: String(formData.get("kid_index") || ""),
     action: "exclude",
     reason: "Parent cancelled this child before invoice creation"
+  });
+  revalidatePath("/");
+}
+
+export async function updatePaymentAdjustmentAction(formData: FormData) {
+  await upsertPaymentAdjustment({
+    source_row_key: String(formData.get("source_row_key") || ""),
+    kid_index: String(formData.get("kid_index") || ""),
+    pennylane_invoice_id: String(formData.get("pennylane_invoice_id") || ""),
+    payment_cycle: String(formData.get("payment_cycle") || ""),
+    expected_amount: String(formData.get("expected_amount") || ""),
+    paid_amount: String(formData.get("paid_amount") || ""),
+    payment_status: String(formData.get("payment_status") || ""),
+    justification_type: String(formData.get("justification_type") || ""),
+    justification_notes: String(formData.get("justification_notes") || "")
   });
   revalidatePath("/");
 }
