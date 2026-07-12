@@ -1,8 +1,11 @@
 node_modules/
+node_modules
 .env
 .env.local
 .DS_Store
 outputs/
 data/thumbnails/
 .next/
+.next
 .vercel/
+.vercel
