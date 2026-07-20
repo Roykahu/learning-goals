@@ -4,6 +4,7 @@ export type ChildRecord = {
   kid_index: string;
   kid_name: string;
   sessions_per_week: string;
+  payment_plan?: string;
   evidence: string[];
 };
 
@@ -83,6 +84,6 @@ export type DashboardData = {
     ignoredChildSections: number;
     readyFamilies: number;
     trackedInvoices: number;
-    paidInvoices: number;
+    paidInvoices;
   };
 };
