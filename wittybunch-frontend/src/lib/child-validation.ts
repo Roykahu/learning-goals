@@ -51,13 +51,15 @@ export function validateChild(input: {
   kid_index: string;
   name: string;
   sessions: string;
+  paymentPlan?: string;
   extraEvidence?: string[];
 }): { child?: ChildRecord; ignored?: IgnoredChild } | undefined {
   const kidIndex = clean(input.kid_index);
   const name = clean(input.name);
   const sessions = clean(input.sessions);
+  const paymentPlan = clean(input.paymentPlan);
   const extraEvidence = (input.extraEvidence || []).map(clean).filter(Boolean);
-  const evidence = [name, sessions, ...extraEvidence].filter((value) => !isNegativeAnswer(value));
+  const evidence = [name, sessions, paymentPlan, ...extraEvidence].filter((value) => !isNegativeAnswer(value));
 
   if (!name && !sessions && extraEvidence.length === 0) {
     return undefined;
@@ -90,13 +92,14 @@ export function validateChild(input: {
       kid_index: kidIndex,
       kid_name: name,
       sessions_per_week: sessions,
+      payment_plan: paymentPlan,
       evidence
     }
   };
 }
 
 export function validateChildren(
-  candidates: Array<{ kid_index: string; name: string; sessions: string; extraEvidence?: string[] }>
+  candidates: Array<{ kid_index: string; name: string; sessions: string; paymentPlan?: string; extraEvidence?: string[] }>
 ): { valid: ChildRecord[]; ignored: IgnoredChild[] } {
   const valid: ChildRecord[] = [];
   const ignored: IgnoredChild[] = [];
