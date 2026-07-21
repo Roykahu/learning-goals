@@ -84,6 +84,6 @@ export type DashboardData = {
     ignoredChildSections: number;
     readyFamilies: number;
     trackedInvoices: number;
-    paidInvoices;
+    paidInvoices: number;
   };
 };
