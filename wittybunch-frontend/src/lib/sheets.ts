@@ -16,6 +16,13 @@ const MESSAGES_TAB = "_messages";
 const OVERRIDES_TAB = "_dashboard_overrides";
 const PAYMENT_ADJUSTMENTS_TAB = "_payment_adjustments";
 const DEPOSIT_TOTAL = 85;
+const FORM_RESPONSES_RANGE = "Form responses 1!A:BP";
+const EXTRA_FORM_SOURCES = [
+  {
+    env: "WITTYBUNCH_BILINGUAL_PAYMENT_FORM_RESPONSES_SHEET_ID",
+    sourceFormKey: "bilingual_payment_2026_2027"
+  }
+];
 
 const PAYMENT_CYCLES: { cycle: PaymentCycle; label: string }[] = [
   { cycle: "reservation", label: "Reservation" },
@@ -52,6 +59,10 @@ function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
   return value;
+}
+
+function optionalEnv(name: string): string {
+  return process.env[name] || "";
 }
 
 function sheetsClient() {
@@ -317,9 +328,12 @@ function parseSubmission(headers: string[], row: string[], sourceFormKey: string
         byHeaderOccurrence(headers, row, "Nom et prénom de l'enfant ", 0) ||
         byHeaderOccurrence(headers, row, "Nom et prénom de l'enfant", 0),
       sessions: byHeaderIncludes(headers, row, ["souhaitez-vous inscrire", "séances"], 0),
+      paymentPlan: byHeaderOccurrence(headers, row, "Le solde annuel devra être réglé selon le mode choisi :", 0),
       extraEvidence: [
         byHeaderIncludes(headers, row, ["premier enfant", "langue"], 0),
-        byHeaderIncludes(headers, row, ["âge", "date"], 0)
+        byHeaderIncludes(headers, row, ["âge", "date"], 0),
+        byHeaderIncludes(headers, row, ["école", "niveau"], 0),
+        byHeaderIncludes(headers, row, ["disponibilités", "mercredi"], 0)
       ]
     },
     {
@@ -330,9 +344,12 @@ function parseSubmission(headers: string[], row: string[], sourceFormKey: string
       sessions:
         byHeaderIncludes(headers, row, ["deuxième enfant", "combien"], 0) ||
         byHeaderOccurrence(headers, row, "Combien de séances voulez vous inscrire votre enfant?", 0),
+      paymentPlan: byHeaderOccurrence(headers, row, "Le solde annuel devra être réglé selon le mode choisi :", 1),
       extraEvidence: [
         byHeaderIncludes(headers, row, ["deuxième enfant", "langue"], 0),
-        byHeaderIncludes(headers, row, ["âge", "date"], 1)
+        byHeaderIncludes(headers, row, ["âge", "date"], 1),
+        byHeaderIncludes(headers, row, ["école", "niveau"], 1),
+        byHeaderIncludes(headers, row, ["disponibilités", "mercredi"], 1)
       ]
     },
     {
@@ -343,9 +360,12 @@ function parseSubmission(headers: string[], row: string[], sourceFormKey: string
       sessions:
         byHeaderIncludes(headers, row, ["troisième enfant", "combien"], 0) ||
         byHeaderOccurrence(headers, row, "A combien de séances voulez-vous inscrire votre enfant?", 0),
+      paymentPlan: byHeaderOccurrence(headers, row, "Le solde annuel devra être réglé selon le mode choisi :", 2),
       extraEvidence: [
         byHeaderIncludes(headers, row, ["troisième enfant", "langue"], 0),
-        byHeaderIncludes(headers, row, ["âge", "date"], 2)
+        byHeaderIncludes(headers, row, ["âge", "date"], 2),
+        byHeaderIncludes(headers, row, ["école", "niveau"], 2),
+        byHeaderIncludes(headers, row, ["disponibilités", "mercredi"], 2)
       ]
     }
   ];
@@ -438,20 +458,33 @@ function summarizePaymentCycles(signups: SignupRow[]): PaymentCycleSummary[] {
 }
 
 export async function getDashboardData(): Promise<DashboardData> {
-  const formSheetId = requireEnv("WITTYBUNCH_FORM_RESPONSES_SHEET_ID");
   const trackingSheetId = requireEnv("WITTYBUNCH_TRACKING_SHEET_ID");
+  const formSources = [
+    {
+      spreadsheetId: requireEnv("WITTYBUNCH_FORM_RESPONSES_SHEET_ID"),
+      sourceFormKey: "signup_2026_2027"
+    },
+    ...EXTRA_FORM_SOURCES.flatMap((source) => {
+      const spreadsheetId = optionalEnv(source.env);
+      return spreadsheetId ? [{ spreadsheetId, sourceFormKey: source.sourceFormKey }] : [];
+    })
+  ];
 
-  const [formValues, signupValues, overrideValues, paymentAdjustmentValues] = await Promise.all([
-    readValues(formSheetId, "Form responses 1!A:BP"),
+  const [formValueSets, signupValues, overrideValues, paymentAdjustmentValues] = await Promise.all([
+    Promise.all(formSources.map(async (source) => ({
+      ...source,
+      values: await readValues(source.spreadsheetId, FORM_RESPONSES_RANGE)
+    }))),
     readValues(trackingSheetId, `${SIGNUPS_TAB}!A:Q`),
     readOptionalValues(trackingSheetId, `${OVERRIDES_TAB}!A:F`),
     readOptionalValues(trackingSheetId, `${PAYMENT_ADJUSTMENTS_TAB}!A:J`)
   ]);
 
-  const headers = formValues[0] || [];
-  const submissions = formValues
-    .slice(1)
-    .map((row) => parseSubmission(headers, row, "signup_2026_2027"))
+  const submissions = formValueSets
+    .flatMap(({ values, sourceFormKey }) => {
+      const headers = values[0] || [];
+      return values.slice(1).map((row) => parseSubmission(headers, row, sourceFormKey));
+    })
     .filter((row): row is ParsedSubmission => Boolean(row));
 
   const paymentAdjustments = latestPaymentAdjustments(paymentAdjustmentValues);
