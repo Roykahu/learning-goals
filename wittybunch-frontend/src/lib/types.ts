@@ -4,6 +4,7 @@ export type ChildRecord = {
   kid_index: string;
   kid_name: string;
   sessions_per_week: string;
+  payment_plan?: string;
   evidence: string[];
 };
 
@@ -47,12 +48,37 @@ export type SignupRow = {
   paid_at: string;
   contract_status: string;
   error_notes: string;
+  payment_cycle: PaymentCycle;
+  payment_cycle_label: string;
+  payment_expected_amount: number;
+  payment_paid_amount: number;
+  payment_status: PaymentStatus;
+  payment_adjustment_reason: string;
+  payment_adjustment_notes: string;
+  payment_adjusted_at: string;
+};
+
+export type PaymentCycle = "reservation" | "trimester_1" | "trimester_2" | "trimester_3";
+
+export type PaymentStatus = "pending" | "paid" | "partial" | "overpaid" | "waived";
+
+export type PaymentCycleSummary = {
+  cycle: PaymentCycle;
+  label: string;
+  expectedTotal: number;
+  paidTotal: number;
+  outstandingTotal: number;
+  paidRows: number;
+  partialRows: number;
+  pendingRows: number;
+  adjustedRows: number;
 };
 
 export type DashboardData = {
   submissions: ParsedSubmission[];
   readyToInvoice: ParsedSubmission[];
   signups: SignupRow[];
+  paymentCycleSummaries: PaymentCycleSummary[];
   metrics: {
     validChildrenPending: number;
     ignoredChildSections: number;

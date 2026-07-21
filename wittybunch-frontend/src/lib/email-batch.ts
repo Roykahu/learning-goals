@@ -68,7 +68,7 @@ function normalizeEmail(email: string): string {
 }
 
 function isPaid(row: SignupRow): boolean {
-  return Boolean(row.paid_at) || /paid|payé|paye/i.test(row.invoice_status);
+  return ["paid", "overpaid", "waived"].includes(row.payment_status) || Boolean(row.paid_at) || /paid|payé|paye|reconciled|settled|lettr/i.test(row.invoice_status);
 }
 
 function isInternalOrTestEmail(email: string): boolean {
